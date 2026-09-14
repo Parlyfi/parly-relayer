@@ -1,0 +1,32 @@
+name: relayer-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  relayer:
+    runs-on: ubuntu-latest
+    env:
+      RELAYER_PRIVATE_KEY: 0x1111111111111111111111111111111111111111111111111111111111111111
+      RELAYER_BOX_PRIVATE_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      RELAYER_KEY_OUTPUT_FILE: .tmp/relayer-box.env
+      RELAYER_REGISTRY_API_BASE_URL: https://registry.example.parly.fi
+      TEMPO_RPC_URL: https://rpc.example.tempo.xyz
+      TEMPO_CHAIN_ID: "4217"
+      TEMPO_LZ_EID: ${{ vars.TEMPO_LZ_EID }}
+      WAKU_CLUSTER_ID: "1"
+      WAKU_BOOTSTRAP: "false"
+      WAKU_CONTENT_TOPIC: /parly/16/9/9/app/proto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm smoke:standalone
+      - run: node ./scripts/healthcheck.mjs

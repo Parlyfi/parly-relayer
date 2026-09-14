@@ -1,0 +1,27 @@
+{
+  "name": "parly-relayer-repo",
+  "private": true,
+  "packageManager": "pnpm@10.6.0",
+  "scripts": {
+    "lint": "pnpm -r --if-present run lint",
+    "build": "pnpm -r --if-present run build",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "start": "pnpm --filter @parly/relayer run start",
+    "keygen:box": "pnpm --filter @parly/relayer run keygen:box",
+    "reconcile:pending": "pnpm --filter @parly/relayer run reconcile:pending",
+    "reconcile:pending:loop": "pnpm --filter @parly/relayer run reconcile:pending:loop",
+    "smoke:env": "pnpm --filter @parly/relayer run smoke:env",
+    "smoke:keygen": "pnpm --filter @parly/relayer run smoke:keygen",
+    "smoke:standalone": "pnpm lint && pnpm typecheck && pnpm build && pnpm smoke:env && pnpm smoke:keygen"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.10"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

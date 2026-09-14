@@ -1,0 +1,26 @@
+{
+  "name": "@parly/shared-types",
+  "version": "16.9.9",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "package.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test:recovery-auth": "pnpm run build && node --test scripts/recovery-auth-message.test.mjs",
+    "test:phase3": "pnpm run build && node --test scripts/phase3-tip1022.test.mjs scripts/phase3-redaction.test.mjs scripts/phase3-refund-binding.test.mjs scripts/phase3-route-status.test.mjs scripts/phase3-internal-model.test.mjs scripts/phase3-payout-lifecycle.test.mjs && node scripts/phase3-grep-gates.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2"
+  }
+}

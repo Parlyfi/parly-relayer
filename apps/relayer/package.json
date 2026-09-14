@@ -1,0 +1,43 @@
+{
+  "name": "@parly/relayer",
+  "version": "16.9.9-operator.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:deps": "pnpm --filter @parly/env-utils run build && pnpm --filter @parly/shared-types run build && pnpm --filter @parly/protocol-abis run build && pnpm --filter @parly/crypto-utils run build && pnpm --filter @parly/registry-client run build",
+    "build": "pnpm run build:deps && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/apps/relayer/src/bot.js",
+    "keygen:box": "node dist/apps/relayer/src/generate-relayer-box-key.js",
+    "reconcile:pending": "node dist/apps/relayer/src/reconcile-pending.js",
+    "reconcile:pending:loop": "node dist/apps/relayer/src/reconcile-pending-loop.js",
+    "smoke:env": "node dist/apps/relayer/src/smoke-config.js",
+    "smoke:mainnet-env": "node dist/apps/relayer/src/mainnet-config.js",
+    "smoke:keygen": "node dist/apps/relayer/src/generate-relayer-box-key.js",
+    "test:phase3": "pnpm run build && node --test script/phase3-finalizer-tests.mjs script/phase3-execution-payload-store-tests.mjs script/phase3-execution-worker-tests.mjs",
+    "test:phase3-store": "pnpm run build && node --test script/phase3-execution-payload-store-tests.mjs",
+    "test:phase3-smoke-config": "node --test script/phase3-smoke-config-tests.mjs",
+    "test:phase3-poc": "pnpm run build && node --test script/phase3-poc-tests.mjs",
+    "poc:phase3-finalizer": "pnpm run build && node script/phase3-finalizer-poc.mjs",
+    "poc:phase3-payout": "pnpm run build && node script/phase3-payout-poc.mjs"
+  },
+  "dependencies": {
+    "@libp2p/bootstrap": "^10.1.2",
+    "@parly/crypto-utils": "workspace:*",
+    "@parly/env-utils": "workspace:*",
+    "@parly/protocol-abis": "workspace:*",
+    "@parly/registry-client": "workspace:*",
+    "@parly/shared-types": "workspace:*",
+    "@waku/sdk": "^0.0.28",
+    "dotenv": "16.4.7",
+    "libsodium-wrappers-sumo": "^0.7.13",
+    "pg": "8.13.3",
+    "viem": "2.43.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.10",
+    "@types/pg": "8.11.11",
+    "typescript": "5.8.2"
+  }
+}

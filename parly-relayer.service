@@ -1,0 +1,12 @@
+[Unit]
+Description=Parly Relayer
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/parly-relayer
+ExecStart=/usr/bin/pnpm start
+Restart=always
+EnvironmentFile=/opt/parly-relayer/.env
+
+[Install]
+WantedBy=multi-user.target

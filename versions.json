@@ -1,0 +1,31 @@
+{
+  "coreRelease": "16.9.9",
+  "registryApiVersion": "relayer-registry/v1",
+  "publicSurfaces": {
+    "relayerRepo": "16.9.9-operator.0",
+    "sdkRepo": "16.9.9-sdk.0",
+    "sdkPackage": "16.9.9",
+    "mcpRepo": "16.9.9-mcp.0",
+    "internalBuildPackages": {
+      "envUtils": "16.9.9",
+      "protocolAbis": "16.9.9",
+      "sharedTypes": "16.9.9",
+      "cryptoUtils": "16.9.9",
+      "registryClient": "16.9.9"
+    }
+  },
+  "compatibility": {
+    "relayerRepo": {
+      "coreRelease": "16.9.9",
+      "registryApiVersion": "relayer-registry/v1"
+    },
+    "sdkPackage": {
+      "coreRelease": "16.9.9",
+      "proofModel": "joinsplit-10-output-v16.9.9"
+    },
+    "mcpRepo": {
+      "sdkPackage": "16.9.9",
+      "agentKeyModel": "AGENT_PRIVATE_KEY only"
+    }
+  }
+}

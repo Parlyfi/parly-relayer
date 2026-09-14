@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"],
+    "paths": {
+      "@parly/env-utils": ["./packages/env-utils/src/index.ts"],
+      "@parly/protocol-abis": ["./packages/protocol-abis/src/index.ts"],
+      "@parly/shared-types": ["./packages/shared-types/src/index.ts"],
+      "@parly/crypto-utils": ["./packages/crypto-utils/src/index.ts"],
+      "@parly/registry-client": ["./packages/registry-client/src/index.ts"]
+    }
+  }
+}

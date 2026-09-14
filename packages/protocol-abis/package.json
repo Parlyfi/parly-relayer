@@ -1,0 +1,28 @@
+{
+  "name": "@parly/protocol-abis",
+  "version": "16.9.9",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "package.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test:phase3": "pnpm run build && node --test scripts/phase3-abis.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "viem": "2.43.5"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2"
+  }
+}

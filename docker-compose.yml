@@ -1,0 +1,11 @@
+services:
+  relayer:
+    build: .
+    env_file: .env
+    command: pnpm start
+    restart: unless-stopped
+  reconciler:
+    build: .
+    env_file: .env
+    command: pnpm reconcile:pending:loop
+    restart: unless-stopped
