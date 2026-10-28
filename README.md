@@ -1,5 +1,9 @@
 # Parly Relayer
 
+Parly supports USDC, USDT and OpenUSD (OUSD). Token availability varies by network.
+This published operator package does not support V4 execution or OpenUSD routes.
+Its supported lanes are listed below; platform support does not upgrade this package.
+
 Production relayer runtime for Parly operators.
 
 ## What this project is
@@ -93,7 +97,7 @@ Live broadcast is gated by:
 - Keep the relayer online.
 - Keep the pending reconciler online.
 - Keep registry heartbeat updates healthy if listed.
-- Keep USDC.e and USDT0 balances, jobs, and accounting separate.
+- Keep balances, jobs, and accounting separate for each supported asset.
 - Secure the execution private key and sealed-box private key.
 - Monitor gas, route costs, and execution profitability.
 - Do not broadcast work that fails local validation.
