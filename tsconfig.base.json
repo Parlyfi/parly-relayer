@@ -13,8 +13,10 @@
     "paths": {
       "@parly/env-utils": ["./packages/env-utils/src/index.ts"],
       "@parly/protocol-abis": ["./packages/protocol-abis/src/index.ts"],
+      "@parly/protocol-abis/*": ["./packages/protocol-abis/src/*.ts"],
       "@parly/shared-types": ["./packages/shared-types/src/index.ts"],
       "@parly/crypto-utils": ["./packages/crypto-utils/src/index.ts"],
+      "@parly/crypto-utils/*": ["./packages/crypto-utils/src/*.ts"],
       "@parly/registry-client": ["./packages/registry-client/src/index.ts"]
     }
   }

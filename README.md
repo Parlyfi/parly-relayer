@@ -1,10 +1,9 @@
 # Parly Relayer
 
-Parly supports USDC, USDT and OpenUSD (OUSD). Token availability varies by network.
-This published operator package does not support V4 execution or OpenUSD routes.
-Its supported lanes are listed below; platform support does not upgrade this package.
+Process private stablecoin payments with Parly's V4 pools and V7 cross-chain payout routes.
 
-Production relayer runtime for Parly operators.
+Supported Tempo assets are USDC.e, USDT0 and OpenUSD (OUSD). Destination assets and
+networks are determined by the active route configuration.
 
 ## What this project is
 
@@ -21,12 +20,13 @@ A relayer can support:
 - pending-state reconciliation
 - registry heartbeat updates for public app discovery
 
-The same operator identity can support both Tempo asset lanes:
+One operator can serve all three Tempo assets:
 
 - USDC.e
 - USDT0
+- OpenUSD (OUSD)
 
-The assets remain separate. A relayer may serve both lanes, but settlement, accounting, fees, and validation stay asset-specific.
+Settlement, accounting, fees and validation remain asset-specific.
 
 ## Quickstart
 
@@ -68,6 +68,20 @@ Registration is automatic when validation passes and a public registry slot is a
 - `SETTLEMENT_DOMAIN_ID=4217`
 - `WAKU_CONTENT_TOPIC`
 
+## V4 and V7 routes
+
+Configure the verified V4 profile through `PHASE3_RECEIVING_V4_PROFILE_JSON` and
+enable private-send execution with `PHASE3_POOL_V4_RELAYER_ENABLED`. Receiving
+work also uses the configured execution database, signing/encryption credentials,
+fee token, confirmation count and measured gas settings.
+
+V7 payouts use `PHASE3_PAYOUT_V7_RELAYER_CONFIG_JSON` and
+`PHASE3_PAYOUT_V7_RELAYER_WEB_API_BASE_URL`. Enable the worker and transaction
+submission through its separate `WORKER_ENABLED` and `BROADCAST_ENABLED` settings.
+The `.env.example` lists the complete variable names. Profile admission determines
+the pools and token addresses for USDC.e, USDT0 and OpenUSD; balances remain
+asset-specific.
+
 ## Optional registry environment
 
 Set this if you want the runtime to keep its public registry entry and heartbeat current:
@@ -85,7 +99,7 @@ These variables are required only when you operate relayer-owned one-time execut
 - `PHASE3_RELAYER_OWNED_EXECUTION_LEASE_MS`
 - `PHASE3_RELAYER_OWNED_EXECUTION_POLL_MS`
 
-Live broadcast is gated by:
+Enable live execution through the relevant runtime settings:
 
 - `PHASE3_FINALIZER_ENABLED`
 - `PHASE3_LIVE_TRANSACTIONS_ENABLED`
@@ -102,9 +116,9 @@ Live broadcast is gated by:
 - Monitor gas, route costs, and execution profitability.
 - Do not broadcast work that fails local validation.
 
-## Safety notes
+## Wallets and configuration
 
 - Use `SETTLEMENT_DOMAIN_ID=4217` for Tempo.
-- Do not configure browser-public credentials as relayer secrets.
-- Do not reuse treasury, admin, or user wallets as relayer execution wallets.
-- Keep live broadcast flags disabled unless you understand the route and operator responsibility they activate.
+- Use a dedicated relayer execution wallet and encryption keypair.
+- Store credentials in server-side secret settings.
+- Validate the configured profile, routes and fee policy before enabling execution.

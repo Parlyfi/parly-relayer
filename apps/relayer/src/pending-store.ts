@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import pg from "pg"
 import { requireEnv } from "@parly/env-utils"
+import type { PayoutV4ExecutionStep, PayoutV5ExecutionStep, PayoutV6ExecutionStep } from "@parly/shared-types"
 
 const { Pool } = pg
 type PoolClient = pg.PoolClient
@@ -44,12 +45,51 @@ export type RelayInboxRecord = {
   source: string
 }
 
+export type PayoutV4LocalCheckpoint = {
+  intentHash: `0x${string}`
+  step: PayoutV4ExecutionStep
+  transactionHash: `0x${string}`
+  relayerAddress: `0x${string}`
+}
+
+export type PayoutV4LocalSubmission = PayoutV4LocalCheckpoint
+
+export type PayoutV5LocalCheckpoint = {
+  intentHash: `0x${string}`
+  step: PayoutV5ExecutionStep
+  transactionHash: `0x${string}`
+  relayerAddress: `0x${string}`
+}
+
+export type PayoutV5LocalSubmission = PayoutV5LocalCheckpoint
+
+export type PayoutV6LocalCheckpoint = {
+  intentHash: `0x${string}`
+  step: PayoutV6ExecutionStep
+  transactionHash: `0x${string}`
+  relayerAddress: `0x${string}`
+}
+
+export type PayoutV6LocalSubmission = PayoutV6LocalCheckpoint
+
 declare global {
   var __parlyPendingExecutionPool: pg.Pool | undefined
   var __parlyPendingExecutionSchemaReady: Promise<void> | undefined
 }
 
 const PENDING_EXECUTION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS relay_pool_v4_executions (
+  call_hash VARCHAR(66) PRIMARY KEY,
+  relayer_address VARCHAR(42) NOT NULL,
+  pool_address VARCHAR(42) NOT NULL,
+  nullifiers TEXT[] NOT NULL,
+  transaction_hash VARCHAR(66),
+  released_at TIMESTAMPTZ,
+  retirement_proof JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE relay_pool_v4_executions ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+ALTER TABLE relay_pool_v4_executions ADD COLUMN IF NOT EXISTS retirement_proof JSONB;
 CREATE TABLE IF NOT EXISTS relay_pending_executions (
   id BIGSERIAL PRIMARY KEY,
   persistence_key TEXT NOT NULL UNIQUE,
@@ -124,16 +164,115 @@ CREATE TABLE IF NOT EXISTS relay_private_inbox (
   claimed_by VARCHAR(42),
   processed_at TIMESTAMPTZ,
   processing_error TEXT,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
   received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE relay_private_inbox
+  ADD COLUMN IF NOT EXISTS transaction_hash VARCHAR(66);
+ALTER TABLE relay_private_inbox
+  ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE relay_private_inbox
+  ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0);
+
 CREATE INDEX IF NOT EXISTS relay_private_inbox_relayer_status_idx
   ON relay_private_inbox(relayer_address, status, received_at);
+
+-- This journal contains only immutable public transaction facts. It lets the
+-- selected relayer retry a remote V4 checkpoint after a restart without ever
+-- rebroadcasting the private Pool withdrawal.
+CREATE TABLE IF NOT EXISTS relay_v4_execution_checkpoints (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'completePayout')),
+  transaction_hash VARCHAR(66) NOT NULL UNIQUE,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step)
+);
+
+CREATE INDEX IF NOT EXISTS relay_v4_execution_checkpoints_relayer_idx
+  ON relay_v4_execution_checkpoints(relayer_address, created_at);
+
+-- A submission is recorded as soon as the node receives its transaction hash.
+-- It is append-only evidence, not a success checkpoint: retries inspect its
+-- receipt before deciding whether a replacement transaction is safe.
+CREATE TABLE IF NOT EXISTS relay_v4_execution_submissions (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'completePayout')),
+  transaction_hash VARCHAR(66) NOT NULL,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step, transaction_hash)
+);
+
+CREATE INDEX IF NOT EXISTS relay_v4_execution_submissions_lookup_idx
+  ON relay_v4_execution_submissions(intent_hash, step, relayer_address, created_at DESC);
+
+ALTER TABLE relay_v4_execution_checkpoints
+  DROP CONSTRAINT IF EXISTS relay_v4_execution_checkpoints_step_check;
+ALTER TABLE relay_v4_execution_checkpoints
+  ADD CONSTRAINT relay_v4_execution_checkpoints_step_check CHECK (
+    step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'completePayout')
+  );
+
+ALTER TABLE relay_v4_execution_submissions
+  DROP CONSTRAINT IF EXISTS relay_v4_execution_submissions_step_check;
+ALTER TABLE relay_v4_execution_submissions
+  ADD CONSTRAINT relay_v4_execution_submissions_step_check CHECK (
+    step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'completePayout')
+  );
+
+CREATE TABLE IF NOT EXISTS relay_v5_execution_checkpoints (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'proveCompletion', 'proveRelayRefund', 'claimRefund')),
+  transaction_hash VARCHAR(66) NOT NULL UNIQUE,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step)
+);
+
+CREATE TABLE IF NOT EXISTS relay_v5_execution_submissions (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'proveCompletion', 'proveRelayRefund', 'claimRefund')),
+  transaction_hash VARCHAR(66) NOT NULL,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step, transaction_hash)
+);
+
+CREATE INDEX IF NOT EXISTS relay_v5_execution_checkpoints_relayer_idx
+  ON relay_v5_execution_checkpoints(relayer_address, created_at);
+CREATE INDEX IF NOT EXISTS relay_v5_execution_submissions_lookup_idx
+  ON relay_v5_execution_submissions(intent_hash, step, relayer_address, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS relay_v6_execution_checkpoints (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'proveCompletion', 'proveRelayRefund', 'claimRefund')),
+  transaction_hash VARCHAR(66) NOT NULL UNIQUE,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step)
+);
+
+CREATE TABLE IF NOT EXISTS relay_v6_execution_submissions (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'proveCompletion', 'proveRelayRefund', 'claimRefund')),
+  transaction_hash VARCHAR(66) NOT NULL,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step, transaction_hash)
+);
+
+CREATE INDEX IF NOT EXISTS relay_v6_execution_checkpoints_relayer_idx
+  ON relay_v6_execution_checkpoints(relayer_address, created_at);
+CREATE INDEX IF NOT EXISTS relay_v6_execution_submissions_lookup_idx
+  ON relay_v6_execution_submissions(intent_hash, step, relayer_address, created_at DESC);
 `
 
 const ADVISORY_LOCK_KEY = 1_609_393_249
 
-function getPendingExecutionPool() {
+export function getPendingExecutionPool() {
   if (!globalThis.__parlyPendingExecutionPool) {
     globalThis.__parlyPendingExecutionPool = new Pool({
       connectionString: requireEnv("DATABASE_URL")
@@ -164,6 +303,24 @@ function buildPersistenceKey(record: PendingRelayerRecord) {
 
   const raw = JSON.stringify(record.rawBundle)
   return `bundle:${createHash("sha256").update(raw).digest("hex")}`
+}
+
+function assertPayoutV4Checkpoint(value: PayoutV4LocalCheckpoint) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(value.intentHash)) throw new Error("V4 intentHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(value.transactionHash)) throw new Error("V4 transactionHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{40}$/u.test(value.relayerAddress)) throw new Error("V4 relayerAddress must be an address.")
+}
+
+function assertPayoutV5Checkpoint(value: PayoutV5LocalCheckpoint) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(value.intentHash)) throw new Error("V5 intentHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(value.transactionHash)) throw new Error("V5 transactionHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{40}$/u.test(value.relayerAddress)) throw new Error("V5 relayerAddress must be an address.")
+}
+
+function assertPayoutV6Checkpoint(value: PayoutV6LocalCheckpoint) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(value.intentHash)) throw new Error("V6 intentHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(value.transactionHash)) throw new Error("V6 transactionHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{40}$/u.test(value.relayerAddress)) throw new Error("V6 relayerAddress must be an address.")
 }
 
 type PendingExecutionRow = {
@@ -258,6 +415,228 @@ export async function persistPendingExecution(record: PendingRelayerRecord) {
       JSON.stringify(record.rawBundle)
     ]
   )
+}
+
+export async function recordPayoutV4LocalCheckpoint(checkpoint: PayoutV4LocalCheckpoint) {
+  assertPayoutV4Checkpoint(checkpoint)
+  await ensurePendingExecutionSchema()
+  const inserted = await getPendingExecutionPool().query<{ transaction_hash: string }>(
+    `INSERT INTO relay_v4_execution_checkpoints (
+       intent_hash, step, transaction_hash, relayer_address
+     ) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (intent_hash, step) DO NOTHING
+     RETURNING transaction_hash`,
+    [
+      checkpoint.intentHash.toLowerCase(),
+      checkpoint.step,
+      checkpoint.transactionHash.toLowerCase(),
+      checkpoint.relayerAddress.toLowerCase()
+    ]
+  )
+  if (inserted.rows[0]) return { recorded: true as const }
+  const existing = await getPendingExecutionPool().query<{ transaction_hash: string; relayer_address: string }>(
+    `SELECT transaction_hash, relayer_address
+     FROM relay_v4_execution_checkpoints
+     WHERE intent_hash = $1 AND step = $2`,
+    [checkpoint.intentHash.toLowerCase(), checkpoint.step]
+  )
+  if (
+    existing.rows[0]?.transaction_hash.toLowerCase() !== checkpoint.transactionHash.toLowerCase() ||
+    existing.rows[0]?.relayer_address.toLowerCase() !== checkpoint.relayerAddress.toLowerCase()
+  ) {
+    throw new Error("V4 local checkpoint already records a different transaction.")
+  }
+  return { recorded: false as const }
+}
+
+export async function recordPayoutV4LocalSubmission(submission: PayoutV4LocalSubmission) {
+  assertPayoutV4Checkpoint(submission)
+  await ensurePendingExecutionSchema()
+  await getPendingExecutionPool().query(
+    `INSERT INTO relay_v4_execution_submissions (
+       intent_hash, step, transaction_hash, relayer_address
+     ) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (intent_hash, step, transaction_hash) DO NOTHING`,
+    [
+      submission.intentHash.toLowerCase(),
+      submission.step,
+      submission.transactionHash.toLowerCase(),
+      submission.relayerAddress.toLowerCase()
+    ]
+  )
+}
+
+export async function listPayoutV4LocalSubmissions(args: {
+  intentHash: `0x${string}`
+  step: PayoutV4LocalSubmission["step"]
+  relayerAddress: `0x${string}`
+}) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(args.intentHash)) throw new Error("V4 intentHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) throw new Error("V4 relayerAddress must be an address.")
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{ transaction_hash: `0x${string}` }>(
+    `SELECT transaction_hash
+     FROM relay_v4_execution_submissions
+     WHERE intent_hash = $1 AND step = $2 AND relayer_address = $3
+     ORDER BY created_at DESC, transaction_hash DESC`,
+    [args.intentHash.toLowerCase(), args.step, args.relayerAddress.toLowerCase()]
+  )
+  return result.rows.map((row) => row.transaction_hash.toLowerCase() as `0x${string}`)
+}
+
+export async function getPayoutV4LocalCheckpoint(args: {
+  intentHash: `0x${string}`
+  step: PayoutV4LocalCheckpoint["step"]
+  relayerAddress: `0x${string}`
+}) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(args.intentHash)) throw new Error("V4 intentHash must be bytes32.")
+  if (!/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) throw new Error("V4 relayerAddress must be an address.")
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{ transaction_hash: `0x${string}` }>(
+    `SELECT transaction_hash
+     FROM relay_v4_execution_checkpoints
+     WHERE intent_hash = $1 AND step = $2 AND relayer_address = $3
+     LIMIT 1`,
+    [args.intentHash.toLowerCase(), args.step, args.relayerAddress.toLowerCase()]
+  )
+  const transactionHash = result.rows[0]?.transaction_hash
+  return transactionHash ? { transactionHash: transactionHash.toLowerCase() as `0x${string}` } : null
+}
+
+export async function recordPayoutV5LocalCheckpoint(checkpoint: PayoutV5LocalCheckpoint) {
+  assertPayoutV5Checkpoint(checkpoint)
+  await ensurePendingExecutionSchema()
+  const inserted = await getPendingExecutionPool().query<{ transaction_hash: string }>(
+    `INSERT INTO relay_v5_execution_checkpoints (intent_hash, step, transaction_hash, relayer_address)
+     VALUES ($1, $2, $3, $4) ON CONFLICT (intent_hash, step) DO NOTHING RETURNING transaction_hash`,
+    [checkpoint.intentHash.toLowerCase(), checkpoint.step, checkpoint.transactionHash.toLowerCase(), checkpoint.relayerAddress.toLowerCase()]
+  )
+  if (inserted.rows[0]) return { recorded: true as const }
+  const existing = await getPendingExecutionPool().query<{ transaction_hash: string; relayer_address: string }>(
+    `SELECT transaction_hash, relayer_address FROM relay_v5_execution_checkpoints WHERE intent_hash = $1 AND step = $2`,
+    [checkpoint.intentHash.toLowerCase(), checkpoint.step]
+  )
+  if (existing.rows[0]?.transaction_hash.toLowerCase() !== checkpoint.transactionHash.toLowerCase() ||
+      existing.rows[0]?.relayer_address.toLowerCase() !== checkpoint.relayerAddress.toLowerCase()) {
+    throw new Error("V5 local checkpoint already records a different transaction.")
+  }
+  return { recorded: false as const }
+}
+
+export async function recordPayoutV5LocalSubmission(submission: PayoutV5LocalSubmission) {
+  assertPayoutV5Checkpoint(submission)
+  await ensurePendingExecutionSchema()
+  await getPendingExecutionPool().query(
+    `INSERT INTO relay_v5_execution_submissions (intent_hash, step, transaction_hash, relayer_address)
+     VALUES ($1, $2, $3, $4) ON CONFLICT (intent_hash, step, transaction_hash) DO NOTHING`,
+    [submission.intentHash.toLowerCase(), submission.step, submission.transactionHash.toLowerCase(), submission.relayerAddress.toLowerCase()]
+  )
+}
+
+export async function listPayoutV5LocalSubmissions(args: { intentHash: `0x${string}`; step: PayoutV5ExecutionStep; relayerAddress: `0x${string}` }) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(args.intentHash) || !/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) throw new Error("V5 local submission lookup is invalid.")
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{ transaction_hash: `0x${string}` }>(
+    `SELECT transaction_hash FROM relay_v5_execution_submissions
+     WHERE intent_hash = $1 AND step = $2 AND relayer_address = $3 ORDER BY created_at DESC, transaction_hash DESC`,
+    [args.intentHash.toLowerCase(), args.step, args.relayerAddress.toLowerCase()]
+  )
+  return result.rows.map((row) => row.transaction_hash.toLowerCase() as `0x${string}`)
+}
+
+export async function getPayoutV5LocalCheckpoint(args: { intentHash: `0x${string}`; step: PayoutV5ExecutionStep; relayerAddress: `0x${string}` }) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(args.intentHash) || !/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) throw new Error("V5 local checkpoint lookup is invalid.")
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{ transaction_hash: `0x${string}` }>(
+    `SELECT transaction_hash FROM relay_v5_execution_checkpoints
+     WHERE intent_hash = $1 AND step = $2 AND relayer_address = $3 LIMIT 1`,
+    [args.intentHash.toLowerCase(), args.step, args.relayerAddress.toLowerCase()]
+  )
+  return result.rows[0]?.transaction_hash ? { transactionHash: result.rows[0].transaction_hash.toLowerCase() as `0x${string}` } : null
+}
+
+export async function recordPayoutV6LocalCheckpoint(checkpoint: PayoutV6LocalCheckpoint) {
+  assertPayoutV6Checkpoint(checkpoint)
+  await ensurePendingExecutionSchema()
+  const inserted = await getPendingExecutionPool().query<{ transaction_hash: string }>(
+    `INSERT INTO relay_v6_execution_checkpoints (intent_hash, step, transaction_hash, relayer_address)
+     VALUES ($1, $2, $3, $4) ON CONFLICT (intent_hash, step) DO NOTHING RETURNING transaction_hash`,
+    [checkpoint.intentHash.toLowerCase(), checkpoint.step, checkpoint.transactionHash.toLowerCase(), checkpoint.relayerAddress.toLowerCase()]
+  )
+  if (inserted.rows[0]) return { recorded: true as const }
+  const existing = await getPendingExecutionPool().query<{ transaction_hash: string; relayer_address: string }>(
+    `SELECT transaction_hash, relayer_address FROM relay_v6_execution_checkpoints WHERE intent_hash = $1 AND step = $2`,
+    [checkpoint.intentHash.toLowerCase(), checkpoint.step]
+  )
+  if (existing.rows[0]?.transaction_hash.toLowerCase() !== checkpoint.transactionHash.toLowerCase() ||
+      existing.rows[0]?.relayer_address.toLowerCase() !== checkpoint.relayerAddress.toLowerCase()) {
+    throw new Error("V6 local checkpoint already records a different transaction.")
+  }
+  return { recorded: false as const }
+}
+
+export async function recordPayoutV6LocalSubmission(submission: PayoutV6LocalSubmission) {
+  assertPayoutV6Checkpoint(submission)
+  await ensurePendingExecutionSchema()
+  await getPendingExecutionPool().query(
+    `INSERT INTO relay_v6_execution_submissions (intent_hash, step, transaction_hash, relayer_address)
+     VALUES ($1, $2, $3, $4) ON CONFLICT (intent_hash, step, transaction_hash) DO NOTHING`,
+    [submission.intentHash.toLowerCase(), submission.step, submission.transactionHash.toLowerCase(), submission.relayerAddress.toLowerCase()]
+  )
+}
+
+export async function listPayoutV6LocalSubmissions(args: { intentHash: `0x${string}`; step: PayoutV6ExecutionStep; relayerAddress: `0x${string}` }) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(args.intentHash) || !/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) throw new Error("V6 local submission lookup is invalid.")
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{ transaction_hash: `0x${string}` }>(
+    `SELECT transaction_hash FROM relay_v6_execution_submissions
+     WHERE intent_hash = $1 AND step = $2 AND relayer_address = $3 ORDER BY created_at DESC, transaction_hash DESC`,
+    [args.intentHash.toLowerCase(), args.step, args.relayerAddress.toLowerCase()]
+  )
+  return result.rows.map((row) => row.transaction_hash.toLowerCase() as `0x${string}`)
+}
+
+export async function getPayoutV6LocalCheckpoint(args: { intentHash: `0x${string}`; step: PayoutV6ExecutionStep; relayerAddress: `0x${string}` }) {
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(args.intentHash) || !/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) throw new Error("V6 local checkpoint lookup is invalid.")
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{ transaction_hash: `0x${string}` }>(
+    `SELECT transaction_hash FROM relay_v6_execution_checkpoints
+     WHERE intent_hash = $1 AND step = $2 AND relayer_address = $3 LIMIT 1`,
+    [args.intentHash.toLowerCase(), args.step, args.relayerAddress.toLowerCase()]
+  )
+  return result.rows[0]?.transaction_hash ? { transactionHash: result.rows[0].transaction_hash.toLowerCase() as `0x${string}` } : null
+}
+
+export async function listPayoutV6DownstreamCheckpoints(args: {
+  relayerAddress: `0x${string}`
+}) {
+  if (!/^0x[a-fA-F0-9]{40}$/u.test(args.relayerAddress)) {
+    throw new Error("V6 local checkpoint lookup is invalid.")
+  }
+  await ensurePendingExecutionSchema()
+  const result = await getPendingExecutionPool().query<{
+    intent_hash: `0x${string}`
+    transaction_hash: `0x${string}`
+  }>(
+    `SELECT intent_hash, transaction_hash
+       FROM relay_v6_execution_checkpoints submitted
+      WHERE step = 'submitPayout'
+        AND relayer_address = $1
+        AND NOT EXISTS (
+          SELECT 1
+            FROM relay_v6_execution_checkpoints terminal
+           WHERE terminal.intent_hash = submitted.intent_hash
+             AND terminal.relayer_address = submitted.relayer_address
+             AND terminal.step IN ('proveCompletion', 'proveRelayRefund')
+        )
+      ORDER BY created_at ASC
+      LIMIT 50`,
+    [args.relayerAddress.toLowerCase()]
+  )
+  return result.rows.map((row) => ({
+    intentHash: row.intent_hash.toLowerCase() as `0x${string}`,
+    transactionHash: row.transaction_hash.toLowerCase() as `0x${string}`
+  }))
 }
 
 export async function listPendingExecutions(): Promise<StoredPendingRelayerRecord[]> {
@@ -417,6 +796,7 @@ export async function claimRelayInboxBatch(
           FROM relay_private_inbox
           WHERE relayer_address = $1
             AND status = 'pending'
+            AND next_attempt_at <= CURRENT_TIMESTAMP
           ORDER BY received_at ASC, id ASC
           LIMIT $2
           FOR UPDATE SKIP LOCKED
@@ -449,7 +829,7 @@ export async function claimRelayInboxBatch(
   }
 }
 
-export async function markRelayInboxProcessed(id: number) {
+export async function markRelayInboxProcessed(id: number, processingError: string | null = null) {
   await ensurePendingExecutionSchema()
   await getPendingExecutionPool().query(
     `
@@ -457,24 +837,82 @@ export async function markRelayInboxProcessed(id: number) {
       SET
         status = 'processed',
         processed_at = CURRENT_TIMESTAMP,
-        processing_error = NULL
+        processing_error = $2
       WHERE id = $1
     `,
-    [id]
+    [id, processingError?.slice(0, 512) ?? null]
   )
 }
 
-export async function resetRelayInboxClaim(id: number, errorMessage: string) {
+export async function retainPoolV4RelayExecution(args: { callHash: `0x${string}`; pool: `0x${string}`; relayer: `0x${string}`; nullifiers: `0x${string}`[] }, reserve = true) {
+  if (!/^0x[a-f0-9]{64}$/.test(args.callHash) || !/^0x[a-fA-F0-9]{40}$/.test(args.pool) || !/^0x[a-fA-F0-9]{40}$/.test(args.relayer) || args.nullifiers.length < 1 || args.nullifiers.length > 4 || args.nullifiers.some(n => !/^0x[a-f0-9]{64}$/.test(n))) throw Error("PoolV4 execution identity is invalid.")
+  await ensurePendingExecutionSchema()
+  const db = await getPendingExecutionPool().connect()
+  try {
+    await db.query("BEGIN")
+    for (const nf of [...args.nullifiers].sort()) await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["pool-v4:" + args.pool.toLowerCase() + ":" + nf])
+    const retired = await db.query("SELECT call_hash FROM relay_pool_v4_executions WHERE call_hash=$1 AND released_at IS NOT NULL", [args.callHash])
+    if (retired.rows.length) throw Error("PoolV4 original call is permanently retired.")
+    const prior = await db.query<{ call_hash: string; relayer_address: string; transaction_hash: `0x${string}` | null }>("SELECT call_hash,relayer_address,transaction_hash FROM relay_pool_v4_executions WHERE pool_address=$1 AND released_at IS NULL AND nullifiers && $2::text[]", [args.pool.toLowerCase(), args.nullifiers])
+    if (prior.rows.length) {
+      if (prior.rows.length !== 1 || prior.rows[0]!.call_hash !== args.callHash || prior.rows[0]!.relayer_address !== args.relayer.toLowerCase()) throw Error("PoolV4 inputs already have a retained execution.")
+      await db.query("COMMIT")
+      return { fresh: false, transactionHash: prior.rows[0]!.transaction_hash }
+    }
+    if (reserve) await db.query("INSERT INTO relay_pool_v4_executions(call_hash,relayer_address,pool_address,nullifiers) VALUES($1,$2,$3,$4)", [args.callHash, args.relayer.toLowerCase(), args.pool.toLowerCase(), args.nullifiers])
+    await db.query("COMMIT")
+    return { fresh: true, transactionHash: null }
+  } catch (e) { await db.query("ROLLBACK"); throw e } finally { db.release() }
+}
+
+// Only the V7 expired-lease verifier may release this exact row; original signatures remain fenced.
+export async function retirePayoutV7SourceLock(args: { callHash: `0x${string}`; pool: `0x${string}`; relayer: `0x${string}`; nullifiers: `0x${string}`[] }, verify: () => Promise<{ sourceCallHash: string; pool: string; nullifiers: string[]; blockNumber: string; blockHash: string; blockTimestamp: string }>) {
+  if (!/^0x[a-f0-9]{64}$/.test(args.callHash) || !/^0x[a-fA-F0-9]{40}$/.test(args.pool) || !/^0x[a-fA-F0-9]{40}$/.test(args.relayer) || args.nullifiers.length < 1 || args.nullifiers.length > 4 || new Set(args.nullifiers).size !== args.nullifiers.length || args.nullifiers.some(n => !/^0x[a-f0-9]{64}$/.test(n))) throw Error("V7 retirement identity is invalid.")
+  await ensurePendingExecutionSchema()
+  const db = await getPendingExecutionPool().connect()
+  try {
+    await db.query("BEGIN")
+    for (const nf of [...args.nullifiers].sort()) await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["pool-v4:" + args.pool.toLowerCase() + ":" + nf])
+    const result = await db.query("SELECT * FROM relay_pool_v4_executions WHERE call_hash=$1 FOR UPDATE", [args.callHash]), row = result.rows[0]
+    if (row && (row.pool_address !== args.pool.toLowerCase() || row.relayer_address !== args.relayer.toLowerCase() || [...row.nullifiers].sort().join() !== [...args.nullifiers].sort().join())) throw Error("V7 retired source binding changed.")
+    if (row?.released_at) { await db.query("COMMIT"); return row.retirement_proof }
+    const proof = await verify()
+    if (proof.sourceCallHash !== args.callHash || proof.pool.toLowerCase() !== args.pool.toLowerCase() || [...proof.nullifiers].sort().join() !== [...args.nullifiers].sort().join() || !/^0x[a-f0-9]{64}$/.test(proof.blockHash) || !/^[1-9][0-9]*$/.test(proof.blockNumber) || !/^[1-9][0-9]*$/.test(proof.blockTimestamp)) throw Error("V7 retirement proof is not bound to the exact lock.")
+    if (row) await db.query("UPDATE relay_pool_v4_executions SET released_at=CURRENT_TIMESTAMP,retirement_proof=$2 WHERE call_hash=$1", [args.callHash, JSON.stringify(proof)])
+    else await db.query("INSERT INTO relay_pool_v4_executions(call_hash,relayer_address,pool_address,nullifiers,released_at,retirement_proof) VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP,$5)", [args.callHash, args.relayer.toLowerCase(), args.pool.toLowerCase(), args.nullifiers, JSON.stringify(proof)])
+    await db.query("COMMIT"); return proof
+  } catch (e) { await db.query("ROLLBACK"); throw e } finally { db.release() }
+}
+
+export async function recordPoolV4RelaySubmission(args: { callHash: `0x${string}`; relayer: `0x${string}`; hash: `0x${string}`; bundleKey: string }) {
+  if (!/^0x[a-f0-9]{64}$/.test(args.hash) || !/^0x[a-f0-9]{64}$/.test(args.callHash) || !/^[a-f0-9]{64}$/.test(args.bundleKey)) throw Error("PoolV4 submission identity is invalid.")
+  await ensurePendingExecutionSchema()
+  const db = await getPendingExecutionPool().connect()
+  try {
+    await db.query("BEGIN")
+    const updated = await db.query("UPDATE relay_pool_v4_executions SET transaction_hash=$3 WHERE call_hash=$1 AND relayer_address=$2 AND (transaction_hash IS NULL OR transaction_hash=$3) RETURNING call_hash", [args.callHash, args.relayer.toLowerCase(), args.hash])
+    if (updated.rows.length !== 1) throw Error("PoolV4 retained execution no longer matches.")
+    await db.query("UPDATE relay_private_inbox SET transaction_hash=$3 WHERE bundle_key=$1 AND relayer_address=$2 AND (transaction_hash IS NULL OR transaction_hash=$3)", [args.bundleKey, args.relayer.toLowerCase(), args.hash])
+    await db.query("COMMIT")
+  } catch (e) { await db.query("ROLLBACK"); throw e } finally { db.release() }
+}
+
+export async function resetRelayInboxClaim(id: number, errorMessage: string, retryAfterSeconds = 10) {
+  if (!Number.isInteger(retryAfterSeconds) || retryAfterSeconds < 1 || retryAfterSeconds > 3600) {
+    throw new Error("relay inbox retry delay must be between 1 and 3600 seconds.")
+  }
   await ensurePendingExecutionSchema()
   await getPendingExecutionPool().query(
     `
       UPDATE relay_private_inbox
       SET
         status = 'pending',
-        processing_error = $2
+        processing_error = $2,
+        next_attempt_at = CURRENT_TIMESTAMP + ($3 * INTERVAL '1 second'),
+        attempt_count = attempt_count + 1
       WHERE id = $1
     `,
-    [id, errorMessage]
+    [id, errorMessage.slice(0, 512), retryAfterSeconds]
   )
 }
 

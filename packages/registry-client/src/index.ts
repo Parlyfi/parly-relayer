@@ -1,5 +1,9 @@
 import { isAddress } from "viem"
-import type { RelayerRegistryEntry, RelayerRegistryResponse } from "@parly/shared-types"
+import type {
+  RelayerRegistryEntry,
+  RelayerRegistryResponse,
+  SignedRelayExecutionFeeScheduleV2
+} from "@parly/shared-types"
 
 export type FetchRelayerRegistryOptions = {
   fetchImpl?: typeof fetch
@@ -73,7 +77,8 @@ function canonicalizeRelayerPublicKeyB64(value: string) {
 
 function normalizeRegistryRow(
   executionAddress: unknown,
-  publicKeyB64: unknown
+  publicKeyB64: unknown,
+  feeSchedules?: unknown
 ): RelayerRegistryEntry | null {
   const normalizedAddress = String(executionAddress || "").trim().toLowerCase() as `0x${string}`
   if (!isAddress(normalizedAddress)) {
@@ -85,9 +90,33 @@ function normalizeRegistryRow(
     return null
   }
 
+  const normalizedFeeSchedules = Array.isArray(feeSchedules)
+    ? feeSchedules.filter((entry): entry is SignedRelayExecutionFeeScheduleV2 => {
+        const schedule = entry?.schedule
+        return Boolean(
+          schedule &&
+          isAddress(schedule.pool) &&
+          isAddress(schedule.relayer) &&
+          schedule.relayer.toLowerCase() === normalizedAddress &&
+          Number.isInteger(schedule.chainId) &&
+          (schedule.executionMode === 0 || schedule.executionMode === 1) &&
+          Number.isInteger(schedule.inputCount) &&
+          Number.isInteger(schedule.outputCount) &&
+          typeof schedule.executorFee === "string" &&
+          typeof schedule.maximumGasPrice === "string" &&
+          typeof schedule.scheduleNonce === "string" &&
+          Number.isInteger(schedule.validAfter) &&
+          Number.isInteger(schedule.expiry) &&
+          typeof entry.scheduleHash === "string" &&
+          typeof entry.signature === "string"
+        )
+      })
+    : []
+
   return {
     executionAddress: normalizedAddress,
-    publicKeyB64: normalizedPublicKey
+    publicKeyB64: normalizedPublicKey,
+    ...(normalizedFeeSchedules.length > 0 ? { feeSchedules: normalizedFeeSchedules } : {})
   }
 }
 
@@ -114,7 +143,10 @@ export async function fetchOfficialRelayerRegistry(
   const endpoint = options.endpoint || "/api/relayers"
 
   try {
-    const res = await fetchImpl(endpoint, { cache: "no-store" as RequestCache })
+    const res = await fetchImpl(endpoint, {
+      cache: "no-store" as RequestCache,
+      signal: AbortSignal.timeout(10_000)
+    })
     if (!res.ok) {
       throw new Error(`Registry request failed with HTTP ${res.status}`)
     }
@@ -125,7 +157,9 @@ export async function fetchOfficialRelayerRegistry(
     }
 
     const items = json.items
-      .map((row: any) => normalizeRegistryRow(row.executionAddress, row.publicKeyB64))
+      .map((row: any) =>
+        normalizeRegistryRow(row.executionAddress, row.publicKeyB64, row.feeSchedules)
+      )
       .filter((row: RelayerRegistryEntry | null): row is RelayerRegistryEntry => Boolean(row))
 
     return {

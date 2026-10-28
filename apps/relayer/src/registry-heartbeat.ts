@@ -1,7 +1,11 @@
 import type { PrivateKeyAccount } from "viem/accounts"
 import { buildRelayerHeartbeatMessage } from "@parly/crypto-utils"
+import type { SignedRelayExecutionFeeScheduleV2 } from "@parly/shared-types"
 
-export async function postRelayerHeartbeat(account: PrivateKeyAccount) {
+export async function postRelayerHeartbeat(
+  account: PrivateKeyAccount,
+  feeSchedules: readonly SignedRelayExecutionFeeScheduleV2[] = []
+) {
   const baseUrl = String(process.env.RELAYER_REGISTRY_API_BASE_URL || "").trim()
   if (!baseUrl) {
     return { sent: false as const, reason: "registry_not_configured" as const }
@@ -22,7 +26,8 @@ export async function postRelayerHeartbeat(account: PrivateKeyAccount) {
       executionAddress,
       event: "SUCCESS",
       timestamp,
-      signature
+      signature,
+      ...(feeSchedules.length === 0 ? {} : { feeSchedules })
     })
   })
 

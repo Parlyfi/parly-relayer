@@ -10,12 +10,20 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./payout-v7": {
+      "types": "./dist/payout-v7.d.ts",
+      "default": "./dist/payout-v7.js"
+    },
+    "./relay-reward-policy-v4": {
+      "types": "./dist/relay-reward-policy-v4.d.ts",
+      "default": "./dist/relay-reward-policy-v4.js"
+    }
   },
   "files": ["dist", "package.json"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test:phase3": "pnpm run build && node --test scripts/phase3-abis.test.mjs",
+    "test:phase3": "pnpm run build && node --test scripts/phase3-abis.test.mjs scripts/relay-reward-policy-v4.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"
   },

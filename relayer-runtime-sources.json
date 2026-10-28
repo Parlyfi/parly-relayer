@@ -1,0 +1,82 @@
+[
+  {
+    "source": "indexer/execution-payload-producer.ts",
+    "target": "apps/relayer/src/internal/indexer/execution-payload-producer.ts",
+    "sourceSha256": "8c5404ac36078dc8d2b73c2e13f0d877c350e4f7e9f9bb77e67df3a9dd60b438"
+  },
+  {
+    "source": "indexer/index.ts",
+    "target": "apps/relayer/src/internal/indexer/index.ts",
+    "sourceSha256": "8ddb42e61d19e6b808fb7d0cb978fd8df86a1632746e9f312abb971d65ca912d"
+  },
+  {
+    "source": "indexer/live-feeder.ts",
+    "target": "apps/relayer/src/internal/indexer/live-feeder.ts",
+    "sourceSha256": "50cfebc39943e132e154c43b045d62ea2bdcdf89fb98b9d78e61700321849b40"
+  },
+  {
+    "source": "indexer/observation-routes.ts",
+    "target": "apps/relayer/src/internal/indexer/observation-routes.ts",
+    "sourceSha256": "76d87d01d842bb14cf7f9bd44f4fb691c9a6c0ca4c7277bbd3d1c457b9c7f8a8"
+  },
+  {
+    "source": "indexer/observation-worker.ts",
+    "target": "apps/relayer/src/internal/indexer/observation-worker.ts",
+    "sourceSha256": "6bb0108c54fb862481b3d5ebe155ddda6f858b758002df5a98b32484021f24b4"
+  },
+  {
+    "source": "indexer/receiving-provider-source-v4.ts",
+    "target": "apps/relayer/src/internal/indexer/receiving-provider-source-v4.ts",
+    "sourceSha256": "aef1a1d801e0da3920e4409c36883e0e44dc0968af41536d991c0093c80e245f"
+  },
+  {
+    "source": "indexer/receiving-seed-v4.ts",
+    "target": "apps/relayer/src/internal/indexer/receiving-seed-v4.ts",
+    "sourceSha256": "d1fa92dea700ac25135dc93e3b7e10b383aa5978c0b10860dca034a56ae6eebc"
+  },
+  {
+    "source": "indexer/tip1022.ts",
+    "target": "apps/relayer/src/internal/indexer/tip1022.ts",
+    "sourceSha256": "625efc1c0ec85e3ddc83009339bf17956513ea10451df0dcac092894c90927f2"
+  },
+  {
+    "source": "receiving/payout-v7-retirement.ts",
+    "target": "apps/relayer/src/internal/receiving/payout-v7-retirement.ts",
+    "sourceSha256": "c8d7b0c4a32f5a7f104ab0f89928215e4065c29b15552fb8006884d5494ee6d9"
+  },
+  {
+    "source": "receiving/receiving-artifacts-v4.ts",
+    "target": "apps/relayer/src/internal/receiving/receiving-artifacts-v4.ts",
+    "sourceSha256": "faed3e18e264d995f830f10deb2011e6b4ec5dac09c74809ea13b9802abf9b08"
+  },
+  {
+    "source": "receiving/receiving-frame-v4.ts",
+    "target": "apps/relayer/src/internal/receiving/receiving-frame-v4.ts",
+    "sourceSha256": "36c39a37d2bda6bf431370f683228c58c71619c9707c2581c10793a4357485e8"
+  },
+  {
+    "source": "receiving/receiving-membership-v4.ts",
+    "target": "apps/relayer/src/internal/receiving/receiving-membership-v4.ts",
+    "sourceSha256": "a3c3ddb891f32568e616e8ef80fc59e9567dc361385a4debe571eebcfe4bf83e"
+  },
+  {
+    "source": "receiving/receiving-preparation-v4.ts",
+    "target": "apps/relayer/src/internal/receiving/receiving-preparation-v4.ts",
+    "sourceSha256": "40e80a465da5be8e39c70256cc9fb4b67ae93b74e61e8c72264e46701e910ad8"
+  },
+  {
+    "source": "receiving/receiving-publication-v4.ts",
+    "target": "apps/relayer/src/internal/receiving/receiving-publication-v4.ts",
+    "sourceSha256": "291f568ffa636ecd9adb85d81984209bb4004bea5c5ce33174ae5f41b532a62c"
+  },
+  {
+    "source": "packages/sdk/src/payout-v7.ts",
+    "target": "apps/relayer/src/internal/sdk/payout-v7.ts",
+    "sourceSha256": "98a14cedeb22debb4a50923543a586c1c42bd0c28f1085ee49a4b4135d38247b"
+  },
+  {
+    "source": "packages/sdk/src/current-artifacts-v4.ts",
+    "target": "apps/relayer/src/internal/sdk/current-artifacts-v4.ts",
+    "sourceSha256": "ed665d4b2ccf1099394b90e3fa92b97ab5c4581307a3a7e6b64612967957d2c5"
+  }
+]

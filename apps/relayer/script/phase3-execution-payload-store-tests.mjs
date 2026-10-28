@@ -22,6 +22,19 @@ function samplePayload() {
   }
 }
 
+function samplePayoutPayload() {
+  return {
+    payoutId: "payout-1",
+    intentHash: `0x${"1".repeat(64)}`,
+    idempotencyKey: "phase3-payout:payout-1",
+    status: "escrow_receipt_confirmed",
+    payoutAuthority: "0x2222222222222222222222222222222222222222",
+    destinationRecipient: "0x3333333333333333333333333333333333333333",
+    providerData: "0x1234",
+    providerDataHash: "0x56570de287d73cd1cb6092bb8fdee6173974955fdef345ae579ee9f475ea7432"
+  }
+}
+
 function fakePool(respond) {
   const calls = []
   const client = {
@@ -52,6 +65,16 @@ test("execution payload encryption preserves bigint fields without plaintext per
 
   assert.doesNotMatch(persisted, /deadbeef|attemptSignature|1000/u)
   assert.deepEqual(store.decryptRelayerOwnedExecutionPayload(sealed, KEY), payload)
+  assert.match(sealed.payloadHash, /^[a-f0-9]{64}$/u)
+})
+
+test("payout V3 execution payload encryption keeps recipient and provider data private", () => {
+  const payload = samplePayoutPayload()
+  const sealed = store.encryptPayoutV3ExecutionPayload(payload, KEY, Buffer.alloc(12, 5))
+  const persisted = Buffer.concat([sealed.iv, sealed.authTag, sealed.ciphertext]).toString("utf8")
+
+  assert.doesNotMatch(persisted, /3333333333333333333333333333333333333333|1234|payoutAuthority/u)
+  assert.deepEqual(store.decryptPayoutV3ExecutionPayload(sealed, KEY), payload)
   assert.match(sealed.payloadHash, /^[a-f0-9]{64}$/u)
 })
 
@@ -97,6 +120,22 @@ test("execution payload datasource acquires one encrypted job with an opaque lea
   assert.equal(leaseCall.values.includes(job.leaseToken), false)
   assert.ok(leaseCall.values.some((value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)))
   assert.match(leaseCall.text, /FOR UPDATE SKIP LOCKED/u)
+  assert.match(leaseCall.text, /ORDER BY updated_at, job_id/u, 'pending jobs must rotate behind ready work')
+})
+
+test('native pending deferral releases only the current lease without consuming retries or checkpoints', async () => {
+  let rowCount = 1
+  const pool = fakePool(() => ({ rowCount, rows: [] }))
+  const ds = store.createRelayerOwnedExecutionPayloadDataSource({ pool, encryptionKey: KEY })
+  await ds.deferRelayerOwnedOneTimeExecutionJob({ jobId: 'job-native', leaseToken: 'current-opaque-lease' })
+  const q = pool.calls.at(-1)
+  assert.match(q.text, /attempt_number=GREATEST\(0,attempt_number-1\)/)
+  assert.match(q.text, /lease_token_hash=\$2 AND status='leased' AND locked_until>=CURRENT_TIMESTAMP/)
+  assert.match(q.text, /updated_at=CURRENT_TIMESTAMP/)
+  assert.equal(q.values.includes('current-opaque-lease'), false)
+  assert.equal(pool.calls.length, 1, 'pending is not a failed or confirmed transaction')
+  rowCount = 0
+  await assert.rejects(() => ds.deferRelayerOwnedOneTimeExecutionJob({ jobId: 'job-native', leaseToken: 'old-lease' }))
 })
 
 test("execution payload datasource quarantines expired leases after retry exhaustion", async () => {
@@ -182,6 +221,61 @@ test("execution payload writer persists ciphertext and is idempotent by attempt"
   assert.ok(insert)
   assert.equal(insert.values.some((value) => JSON.stringify(value).includes("deadbeef")), false)
   assert.ok(insert.values.some((value) => Buffer.isBuffer(value)))
+})
+
+test("payout V3 execution writer persists ciphertext and leases opaque payloads", async () => {
+  const payload = samplePayoutPayload()
+  const sealed = store.encryptPayoutV3ExecutionPayload(payload, KEY, Buffer.alloc(12, 5))
+  const pool = fakePool(({ text }) => {
+    if (/SELECT payload_hash/u.test(text)) return { rowCount: 0, rows: [] }
+    if (/INSERT INTO phase3_private\.payout_execution_payloads/u.test(text)) return { rowCount: 1, rows: [] }
+    if (/UPDATE phase3_private\.payout_execution_payloads/u.test(text)) {
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            payout_id: "payout-1",
+            payload_ciphertext: sealed.ciphertext,
+            payload_iv: sealed.iv,
+            payload_auth_tag: sealed.authTag,
+            payload_hash: sealed.payloadHash
+          }
+        ]
+      }
+    }
+    if (/FROM phase3_private\.payout_execution_checkpoints/u.test(text)) return { rowCount: 0, rows: [] }
+    return { rowCount: 1, rows: [] }
+  })
+  const writer = store.createPayoutV3ExecutionPayloadWriter({
+    pool,
+    encryptionKey: KEY,
+    randomBytes: (size) => Buffer.alloc(size, 5)
+  })
+  await writer.enqueuePayoutV3ExecutionPayload({
+    payoutId: "payout-1",
+    payload,
+    maxAttempts: 3
+  })
+  const insert = pool.calls.find((call) => /INSERT INTO phase3_private\.payout_execution_payloads/u.test(call.text))
+  assert.ok(insert)
+  assert.equal(insert.values.some((value) => JSON.stringify(value).includes("3333333333333333333333333333333333333333")), false)
+
+  const datasource = store.createPayoutV3ExecutionPayloadDataSource({
+    pool,
+    encryptionKey: KEY,
+    randomBytes: () => LEASE_BYTES,
+    now: () => new Date("2026-06-20T20:00:00.000Z")
+  })
+  const job = await datasource.acquirePayoutV3ExecutionJob({
+    workerId: "relayer-0xa4ce",
+    leaseMs: 30_000
+  })
+  assert.equal(job.payoutId, "payout-1")
+  assert.equal(job.leaseToken, LEASE_BYTES.toString("base64url"))
+  assert.equal(job.destinationRecipient, payload.destinationRecipient)
+  const leaseCall = pool.calls.find((call) => /payout_execution_payloads AS job/u.test(call.text) && /lease_token_hash = \$3/u.test(call.text))
+  assert.ok(leaseCall)
+  assert.equal(leaseCall.values.includes(job.leaseToken), false)
 })
 
 test("execution payload writer confirms only the checkpointed finalization transaction", async () => {
@@ -278,6 +372,23 @@ test("execution payload migration keeps payloads private and checkpoints ordered
   assert.match(statusView, /checkpoint_count/u)
   assert.match(migration, /REVOKE ALL ON phase3_private\.relayer_execution_payloads FROM PUBLIC/u)
   assert.match(migration, /REVOKE ALL ON phase3_private\.relayer_execution_status_current FROM PUBLIC/u)
+})
+
+test("payout execution migration keeps raw provider data out of public status views", async () => {
+  const migration = await readFile(new URL("../../web/migrations/phase3-datasource.sql", import.meta.url), "utf8")
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS phase3_private\.payout_execution_payloads/u)
+  assert.match(migration, /payload_ciphertext BYTEA NOT NULL/u)
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS phase3_private\.payout_execution_checkpoints/u)
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS phase3_private\.payout_execution_events/u)
+  assert.match(migration, /CREATE OR REPLACE VIEW phase3_private\.payout_execution_status_current/u)
+  const statusView = migration.match(
+    /CREATE OR REPLACE VIEW phase3_private\.payout_execution_status_current AS(?<body>.*?);/us
+  )?.groups?.body ?? ""
+  assert.doesNotMatch(statusView, /payload_ciphertext|payload_auth_tag|payload_hash|lease_token_hash|destinationRecipient|providerData/u)
+  assert.match(statusView, /checkpoint_transaction_hash/u)
+  assert.match(migration, /REVOKE ALL ON phase3_private\.payout_execution_payloads FROM PUBLIC/u)
+  assert.match(migration, /REVOKE ALL ON phase3_private\.payout_execution_status_current FROM PUBLIC/u)
 })
 
 test("dry-run releases its lease without consuming broadcast retry budget", async () => {

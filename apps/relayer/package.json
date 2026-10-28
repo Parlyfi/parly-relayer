@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build:deps": "pnpm --filter @parly/env-utils run build && pnpm --filter @parly/shared-types run build && pnpm --filter @parly/protocol-abis run build && pnpm --filter @parly/crypto-utils run build && pnpm --filter @parly/registry-client run build",
-    "build": "pnpm run build:deps && tsc -p tsconfig.json",
+    "build": "pnpm run build:deps && tsc -p tsconfig.json && node script/receiving-runtime-layout.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/apps/relayer/src/bot.js",
@@ -15,7 +15,7 @@
     "smoke:env": "node dist/apps/relayer/src/smoke-config.js",
     "smoke:mainnet-env": "node dist/apps/relayer/src/mainnet-config.js",
     "smoke:keygen": "node dist/apps/relayer/src/generate-relayer-box-key.js",
-    "test:phase3": "pnpm run build && node --test script/phase3-finalizer-tests.mjs script/phase3-execution-payload-store-tests.mjs script/phase3-execution-worker-tests.mjs",
+    "test:phase3": "pnpm run build && node --test script/relay-reward-tests.mjs script/phase3-finalizer-tests.mjs script/phase3-execution-payload-store-tests.mjs script/phase3-execution-worker-tests.mjs script/phase3-payout-v4-downstream-tests.mjs script/phase3-payout-v4-batch-tests.mjs script/phase3-payout-v4-attester-client-tests.mjs script/phase3-payout-v5-worker-tests.mjs script/phase3-payout-v5-status-worker-tests.mjs script/receiving-bot-host-v4-tests.mjs script/payout-v7-worker-tests.mjs script/payout-v7-tempo-tests.mjs",
     "test:phase3-store": "pnpm run build && node --test script/phase3-execution-payload-store-tests.mjs",
     "test:phase3-smoke-config": "node --test script/phase3-smoke-config-tests.mjs",
     "test:phase3-poc": "pnpm run build && node --test script/phase3-poc-tests.mjs",
@@ -30,9 +30,11 @@
     "@parly/registry-client": "workspace:*",
     "@parly/shared-types": "workspace:*",
     "@waku/sdk": "^0.0.28",
+    "circomlibjs": "0.1.7",
     "dotenv": "16.4.7",
     "libsodium-wrappers-sumo": "^0.7.13",
     "pg": "8.13.3",
+    "snarkjs": "0.7.4",
     "viem": "2.43.5"
   },
   "devDependencies": {

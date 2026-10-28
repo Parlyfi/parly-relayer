@@ -10,13 +10,20 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./recipient-format-v4": { "types": "./dist/recipient-format-v4.d.ts", "default": "./dist/recipient-format-v4.js" },
+    "./receiving-profile-v4": { "types": "./dist/receiving-profile-v4.d.ts", "default": "./dist/receiving-profile-v4.js" },
+    "./receiving-source-v4": { "types": "./dist/receiving-source-v4.d.ts", "default": "./dist/receiving-source-v4.js" },
+    "./receiving-pending-v4.node": { "types": "./dist/receiving-pending-v4.node.d.ts", "default": "./dist/receiving-pending-v4.node.js" },
+    "./recipient-keys": { "types": "./dist/recipient-keys.d.ts", "default": "./dist/recipient-keys.js" },
+    "./recipient-publication-v4": { "types": "./dist/recipient-publication-v4.d.ts", "default": "./dist/recipient-publication-v4.js" }
   },
   "files": ["dist", "package.json"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test:merkle": "pnpm run build && node --test script/merkle-path.test.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.2"

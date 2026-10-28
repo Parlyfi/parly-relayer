@@ -1,11 +1,29 @@
 import "dotenv/config"
 import {
   isRelayerOwnedOneTimeExecutionBroadcastEnabled,
+  type RelayerOwnedOneTimeExecutionBroadcaster,
   runRelayerOwnedOneTimeExecutionOnce
 } from "./index.js"
 import { createRelayerOwnedExecutionPayloadDataSource } from "./execution-payload-store.js"
+import { parseReceivingProfileV4, receivingProfileJsonV4 } from "@parly/crypto-utils/receiving-profile-v4"
+import { createReceivingFundedWorkerV4 } from "./receiving-funded-worker-v4.js"
+
+type ReceivingBindingsV4 = NonNullable<Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["receivingV4"]> & {
+  sourcePool: Parameters<typeof createReceivingFundedWorkerV4>[0]["pool"]
+  fundedHost: Parameters<typeof createReceivingFundedWorkerV4>[0]["host"]
+}
 
 type Env = NodeJS.ProcessEnv | Record<string, string | undefined>
+
+function requireReceivingBindingsV4(raw: string, bindings?: ReceivingBindingsV4) {
+  const profile = parseReceivingProfileV4(raw)
+  if (!bindings || receivingProfileJsonV4(profile) !== receivingProfileJsonV4(bindings.profile)
+    || [bindings.refreshFinalization, bindings.executeTransaction, bindings.sourcePool?.connect,
+      bindings.fundedHost?.assertFunded, bindings.fundedHost?.prepare, bindings.fundedHost?.assertPrepared].some(fn => typeof fn !== "function")) {
+    throw Error("V4 confirmed-funding host and durable execution bindings are required.")
+  }
+  return profile
+}
 
 export type RelayerOwnedExecutionWorkerConfig =
   | { enabled: false; reason: "phase3_relayer_owned_execution_worker_disabled" }
@@ -66,14 +84,32 @@ export async function runRelayerOwnedExecutionWorkerOnce(args: {
   config: Extract<RelayerOwnedExecutionWorkerConfig, { enabled: true }>
   dataSource?: Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["dataSource"]
   env?: NodeJS.ProcessEnv
+  broadcaster?: RelayerOwnedOneTimeExecutionBroadcaster
+  logger?: Pick<Console, "error">
+  refreshReceivingFinalization?:Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["refreshReceivingFinalization"]
+  executeReceivingFinalization?:Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["executeReceivingFinalization"]
+  receivingV4?: ReceivingBindingsV4
 }) {
+  const env = args.env ?? process.env, raw = env.PHASE3_RECEIVING_V4_PROFILE_JSON
+  if (raw) {
+    const profile = requireReceivingBindingsV4(raw, args.receivingV4), bindings = args.receivingV4!
+    const funded = createReceivingFundedWorkerV4({ pool: bindings.sourcePool, profile, host: bindings.fundedHost, workerId: args.config.workerId, leaseMs: args.config.leaseMs })
+    if (args.config.broadcast) {
+      try { await funded.runOnce() }
+      catch { (args.logger ?? console).error("[phase3-relayer-owned-execution] confirmed-funded V4 preparation unavailable") }
+    }
+  } else if (args.receivingV4) throw Error("V4 worker profile must be selected explicitly.")
   const dataSource = args.dataSource ?? createRelayerOwnedExecutionPayloadDataSource()
   return runRelayerOwnedOneTimeExecutionOnce({
     dataSource,
     workerId: args.config.workerId,
     leaseMs: args.config.leaseMs,
     broadcast: args.config.broadcast,
-    env: args.env ?? process.env
+    env: args.env ?? process.env,
+    broadcaster: args.broadcaster,
+    refreshReceivingFinalization: args.refreshReceivingFinalization,
+    executeReceivingFinalization: args.executeReceivingFinalization,
+    receivingV4: args.receivingV4
   })
 }
 
@@ -82,6 +118,10 @@ export function startRelayerOwnedExecutionWorkerLoop(args: {
   dataSource?: Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["dataSource"]
   env?: NodeJS.ProcessEnv
   logger?: Pick<Console, "info" | "error">
+  broadcaster?: RelayerOwnedOneTimeExecutionBroadcaster
+  refreshReceivingFinalization?:Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["refreshReceivingFinalization"]
+  executeReceivingFinalization?:Parameters<typeof runRelayerOwnedOneTimeExecutionOnce>[0]["executeReceivingFinalization"]
+  receivingV4?: ReceivingBindingsV4
 } = {}) {
   const logger = args.logger ?? console
   const config = args.config ?? readRelayerOwnedExecutionWorkerConfig(args.env ?? process.env)
@@ -89,13 +129,25 @@ export function startRelayerOwnedExecutionWorkerLoop(args: {
     logger.info(`[phase3-relayer-owned-execution] ${config.reason}`)
     return { started: false as const, reason: config.reason }
   }
+  const raw = (args.env ?? process.env).PHASE3_RECEIVING_V4_PROFILE_JSON
+  if (raw) {
+    requireReceivingBindingsV4(raw, args.receivingV4)
+  } else if (args.receivingV4) throw Error("V4 worker profile must be selected explicitly.")
 
+  let tickRunning = false
   const tick = async () => {
+    if (args.receivingV4 && tickRunning) return
+    tickRunning = true
     try {
       const result = await runRelayerOwnedExecutionWorkerOnce({
         config,
         dataSource: args.dataSource,
-        env: args.env ?? process.env
+        env: args.env ?? process.env,
+        broadcaster: args.broadcaster,
+        logger,
+        refreshReceivingFinalization: args.refreshReceivingFinalization,
+        executeReceivingFinalization: args.executeReceivingFinalization,
+        receivingV4: args.receivingV4
       })
       if (result.status !== "idle") {
         logger.info(
@@ -106,7 +158,7 @@ export function startRelayerOwnedExecutionWorkerLoop(args: {
       logger.error(
         `[phase3-relayer-owned-execution] ${error instanceof Error ? error.message : String(error)}`
       )
-    }
+    } finally { tickRunning = false }
   }
 
   void tick()

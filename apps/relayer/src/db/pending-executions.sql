@@ -60,3 +60,26 @@ CREATE INDEX IF NOT EXISTS relay_pending_execution_archive_nullifier_idx
   ON relay_pending_execution_archive(nullifier_hash);
 CREATE INDEX IF NOT EXISTS relay_pending_execution_archive_submitted_hash_idx
   ON relay_pending_execution_archive(submitted_hash);
+
+CREATE TABLE IF NOT EXISTS relay_v5_execution_checkpoints (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'proveCompletion', 'proveRelayRefund', 'claimRefund')),
+  transaction_hash VARCHAR(66) NOT NULL UNIQUE,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step)
+);
+
+CREATE TABLE IF NOT EXISTS relay_v5_execution_submissions (
+  intent_hash VARCHAR(66) NOT NULL,
+  step VARCHAR(32) NOT NULL CHECK (step IN ('acceptQuote', 'poolWithdraw', 'confirmEscrowReceipt', 'submitPayout', 'proveCompletion', 'proveRelayRefund', 'claimRefund')),
+  transaction_hash VARCHAR(66) NOT NULL,
+  relayer_address VARCHAR(42) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (intent_hash, step, transaction_hash)
+);
+
+CREATE INDEX IF NOT EXISTS relay_v5_execution_checkpoints_relayer_idx
+  ON relay_v5_execution_checkpoints(relayer_address, created_at);
+CREATE INDEX IF NOT EXISTS relay_v5_execution_submissions_lookup_idx
+  ON relay_v5_execution_submissions(intent_hash, step, relayer_address, created_at DESC);
